@@ -129,6 +129,7 @@
   #oynatici:fullscreen{width:100vw;height:100vh}
   #oynatici:-webkit-full-screen{width:100vw;height:100vh}
   #oynatici:fullscreen #video,#oynatici:-webkit-full-screen #video{width:100%;height:100%;object-fit:contain}
+  #oynatici.doldur #video{object-fit:cover!important}
   .oy-ust{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;padding:14px 16px;
     background:linear-gradient(180deg,rgba(0,0,0,.8),transparent);z-index:5;transition:.3s}
   .oy-ust .gb{width:40px;height:40px;border-radius:11px;background:rgba(255,255,255,.12);display:grid;place-items:center;font-size:19px;flex:none}
@@ -282,6 +283,7 @@
       <button title="Sonraki kanal" onclick="kanalAtla(1)">⏭</button>
       <button id="oy-fav" title="Favori" onclick="oyFav()">☆</button>
       <button title="Harici oynatıcıda aç" onclick="hariciAç()">📤</button>
+      <button id="oy-doldur" title="Ekranı doldur / sığdır" onclick="doldurDegis()">⤢</button>
       <button title="Tam ekran" onclick="tamEkran()">⛶</button>
     </div>
   </div>
@@ -900,6 +902,21 @@ async function oynat(k){
     v.src=url; v.onerror=()=>oyHata(); v.play().catch(()=>{});
   }
 }
+/* ===== EKRANI DOLDUR (siyah kenarları kaldır) ===== */
+function doldurUygula(){
+  let d=true; try{ d=localStorage.getItem('iz_doldur')!=='0'; }catch(e){}
+  document.getElementById('oynatici').classList.toggle('doldur',d);
+  const b=document.getElementById('oy-doldur'); if(b) b.textContent=d?'⤡':'⤢';
+}
+function doldurDegis(){
+  const d=!document.getElementById('oynatici').classList.contains('doldur');
+  try{ localStorage.setItem('iz_doldur',d?'1':'0'); }catch(e){}
+  doldurUygula(); toast(d?'Ekranı doldur':'Sığdır (kenarlar siyah)');
+}
+setTimeout(doldurUygula,0);
+(function(){ let son=0; document.getElementById('video').addEventListener('touchend',()=>{
+  const t=Date.now(); if(t-son<300){ doldurDegis(); son=0; } else son=t; },{passive:true}); })();
+
 /* ===== KANAL ATLAMA ===== */
 let oyListe=null;
 function kanalAtla(yon){
