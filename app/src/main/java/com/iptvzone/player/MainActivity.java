@@ -15,6 +15,14 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Arrays;
+
 public class MainActivity extends Activity {
 
     private WebView web;
@@ -23,6 +31,10 @@ public class MainActivity extends Activity {
     private WebChromeClient.CustomViewCallback ozelCb;
     private WebChromeClient krom;
     private int eskiYon = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+
+    // Oynatıcı her açılışta GitHub'dan güncellenir; internet yoksa son indirilen ya da APK içindeki kopya açılır.
+    private static final String GUNCEL_URL = "https://raw.githubusercontent.com/Dogukan3437/iptv_zone/main/index.html";
+    private File yerelKopya;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,7 +85,66 @@ public class MainActivity extends Activity {
         };
         web.setWebChromeClient(krom);
 
-        web.loadUrl("file:///android_asset/index.html");
+        yerelKopya = new File(getFilesDir(), "index.html");
+        web.loadUrl(yerelKopya.exists() ? "file://" + yerelKopya.getAbsolutePath() : "file:///android_asset/index.html");
+        guncellemeyiIndir();
+    }
+
+    /** GitHub'daki güncel index.html'i indirir; farklıysa kaydedip sayfayı yeniler. */
+    private void guncellemeyiIndir() {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                HttpURLConnection c = null;
+                try {
+                    c = (HttpURLConnection) new URL(GUNCEL_URL + "?t=" + System.currentTimeMillis()).openConnection();
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(15000);
+                    c.setUseCaches(false);
+                    c.setRequestProperty("Cache-Control", "no-cache");
+                    if (c.getResponseCode() != 200) return;
+                    InputStream in = c.getInputStream();
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    in.close();
+                    byte[] yeni = out.toByteArray();
+                    String metin = new String(yeni, "UTF-8");
+                    if (!metin.contains("IPTV ZONE") || !metin.contains("</html>")) return;   // bozuk indirme
+                    byte[] eski = oku(yerelKopya);
+                    if (eski != null && Arrays.equals(eski, yeni)) return;                  // zaten güncel
+                    File gecici = new File(getFilesDir(), "index.tmp");
+                    FileOutputStream fo = new FileOutputStream(gecici);
+                    fo.write(yeni);
+                    fo.close();
+                    if (!gecici.renameTo(yerelKopya)) { yerelKopya.delete(); gecici.renameTo(yerelKopya); }
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (ozelGorunum == null && web != null) web.loadUrl("file://" + yerelKopya.getAbsolutePath());
+                        }
+                    });
+                } catch (Exception e) {
+                    // internet yok: mevcut sürümle devam
+                } finally {
+                    if (c != null) c.disconnect();
+                }
+            }
+        }).start();
+    }
+
+    private static byte[] oku(File f) {
+        if (!f.exists()) return null;
+        try {
+            InputStream in = new java.io.FileInputStream(f);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            in.close();
+            return out.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** Durum çubuğu + gezinme çubuğunu gizler, ekranı yataya çevirir. */
