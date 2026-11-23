@@ -822,6 +822,8 @@ function ozelKanal(ki,gi){
     <p class="aç">Açık / yasal yayın yapan TV veya radyo.</p>
     <div class="alan"><label>Kanal adı</label><input id="k-ad" value="${esc(v.ad)}" placeholder="TRT 1"></div>
     <div class="alan"><label>Yayın linki (.m3u8 / .mp3)</label><input id="k-url" value="${esc(v.url)}" placeholder="https://.../yayin.m3u8" autocapitalize="off"></div>
+    <div id="k-yedekler">${(v.yedekler||[]).map(yedekAlanHTML).join('')}</div>
+    <button class="btn ikincil" style="padding:8px;margin:-4px 0 13px;font-size:13px" onclick="yedekEkle(this)">＋ Yedek link ekle</button>
     <div class="alan"><label>Logo linki (isteğe bağlı)</label><input id="k-logo" value="${esc(v.logo)}" placeholder="https://.../logo.png" autocapitalize="off"></div>
     <div class="alan"><label>Kategori</label>
       <select id="k-kat" onchange="document.getElementById('k-yenikat').style.display=this.value==='__yeni__'?'block':'none'">${seç}<option value="__yeni__">＋ Yeni kategori…</option></select>
@@ -836,7 +838,9 @@ function ozelKanalKaydet(gi,btn){
   let kat=g('#k-kat').value; const tur=g('#k-tur').value;
   if(kat==='__yeni__'){ kat=g('#k-yenikat').value.trim(); if(!kat){ toast('Yeni kategori adı gir'); return; } }
   if(!ad||!url){ toast('Ad ve yayın linki gerekli'); return; }
+  const yedekler=[...btn.parentElement.querySelectorAll('.k-yedek')].map(x=>x.value.trim()).filter(Boolean);
   const d=ozelOku(); if(!d.kats.includes(kat)) d.kats.push(kat); const obj={ad,url,logo,tur,kat};
+  if(yedekler.length) obj.yedekler=yedekler;
   if(gi>=0) d.kanallar[gi]=obj; else d.kanallar.push(obj);
   ozelYaz(d); S._ozelKat=kat; btn.closest('.modal').remove(); ozelYan(); toast('Kaydedildi');
 }
@@ -1061,6 +1065,36 @@ window.androidGeri=function(){
 document.getElementById('icerik').addEventListener('click',()=>{ const y=document.getElementById('yan'); if(y.classList.contains('aç')) yanKapat(); },true);
 // oynatıcı üst barı dokununca da görünsün
 document.getElementById('oynatici').addEventListener('touchstart',()=>{ const u=document.getElementById('oy-ust'); u.style.opacity=1; clearTimeout(barZ); barZ=setTimeout(()=>u.style.opacity=0,3500); },{passive:true});
+
+/* ===== 🔁 YEDEK LİNKLER: ana yayın açılmazsa sıradaki yedeğe geç ===== */
+function yedekAlanHTML(u){ return `<div class="alan" style="display:flex;gap:6px;align-items:center"><input class="k-yedek" value="${esc(u||'')}" placeholder="Yedek yayın linki" autocapitalize="off" style="flex:1"><button class="btn ikincil" style="width:auto;padding:10px 13px;margin:0" onclick="this.parentElement.remove()">✕</button></div>`; }
+function yedekEkle(b){ const k=b.parentElement.querySelector('#k-yedekler'); k.insertAdjacentHTML('beforeend',yedekAlanHTML('')); const i=k.querySelectorAll('.k-yedek'); i[i.length-1].focus(); }
+const _cozAsil=cozYayinURL;
+cozYayinURL=async function(k){ return k._aktifUrl || _cozAsil(k); };
+let _oyDeneme=0, _oyZaman=null;
+const _oynatAsil=oynat;
+oynat=function(k,yedekten){
+  if(!yedekten){ k._yi=0; k._aktifUrl=null; }
+  const d=++_oyDeneme; clearTimeout(_oyZaman);
+  const v=document.getElementById('video');
+  // bazı ölü yayınlar hata vermez, sadece bekletir: 20 sn'de görüntü gelmezse hata say
+  _oyZaman=setTimeout(()=>{ if(d===_oyDeneme && oyAktif===k && v.readyState<2) oyHata(); },20000);
+  return _oynatAsil(k);
+};
+const _oyHataAsil=oyHata;
+oyHata=function(){
+  const k=oyAktif; if(!k) return _oyHataAsil();
+  if(k._sonHata===_oyDeneme) return;          // aynı deneme için tekrar gelen hata
+  k._sonHata=_oyDeneme; clearTimeout(_oyZaman);
+  const Y=Array.isArray(k.yedekler)?k.yedekler.filter(Boolean):[];
+  if((k._yi||0)<Y.length){
+    k._aktifUrl=Y[k._yi]; k._yi=(k._yi||0)+1;
+    oyMesaj('<div class="spin"></div>Yayın açılmadı, yedek '+k._yi+' deneniyor…');
+    const d=_oyDeneme; setTimeout(()=>{ if(d===_oyDeneme && oyAktif===k) oynat(k,true); },400);
+    return;
+  }
+  _oyHataAsil();
+};
 
 /* ===== ☁️ KANAL SENKRONU (GitHub gizli depo) =====
    Yerel Kanallar listesi kullanıcının GİZLİ GitHub deposunda kanallar.json olarak tutulur.
