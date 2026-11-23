@@ -1289,6 +1289,7 @@ async function uyeGiris(kul,sifre){
   const g=(await uyeListesi()).find(x=>x.kul===kul);
   if(!g) throw new Error('Kullanıcı adı veya şifre hatalı');
   const p=await uyeCoz(g,sifre);
+  if(p && uyeSureBitti(g)) throw new Error('Üyelik süren '+uyeBitisYazi(g.bitis)+' tarihinde doldu. Yenilemek için yöneticiyle görüş.');
   if(!p||!p.token||!p.repo) throw new Error('Kullanıcı adı veya şifre hatalı');
   yaz(UYE_LS,{kul:g.kul,etiket:g.etiket,repo:p.repo,token:p.token});
   await uyeBaslat();
@@ -1297,7 +1298,9 @@ async function uyeBaslat(){
   const u=oku(UYE_LS,null); if(!u) return false;
   let liste=null; try{ liste=await uyeListesi(); }catch(e){}      // internet sorunu: kayıtlı anahtarla devam
   if(liste){ const g=liste.find(x=>x.kul===u.kul);
-    if(!g||g.etiket!==u.etiket){ try{localStorage.removeItem(UYE_LS);}catch(e){} throw new Error('Üyeliğin sona erdi ya da şifren değişti. Yeniden giriş yap.'); } }
+    if(!g||g.etiket!==u.etiket){ try{localStorage.removeItem(UYE_LS);}catch(e){} throw new Error('Üyeliğin sona erdi ya da şifren değişti. Yeniden giriş yap.'); }
+    if(uyeSureBitti(g)) throw new Error('Üyelik süren '+uyeBitisYazi(g.bitis)+' tarihinde doldu. Yenilemek için yöneticiyle görüş.');
+    u.bitis=g.bitis||0; yaz(UYE_LS,u); }
   let d; try{ d=await uyeKanalCek(u); }catch(e){ if(/geçersiz/.test(e.message)){ try{localStorage.removeItem(UYE_LS);}catch(_){} } throw e; }
   S.uyeMod=true; S.uyeVeri=d; S.uye=u;
   S.profil={tip:'ozel',ad:'Üye: '+u.kul,uye:true};
@@ -1305,12 +1308,18 @@ async function uyeBaslat(){
   uygulamaAç();
   return true;
 }
+function uyeSureBitti(g){ return !!(g && g.bitis && g.bitis*1000 < Date.now()); }
+function uyeBitisYazi(b){ return b ? new Date(b*1000).toLocaleDateString('tr-TR') : 'Sınırsız'; }
 function uyeCikis(){
   try{ localStorage.removeItem(UYE_LS); }catch(e){}
   S.uyeMod=false; S.uyeVeri=null; S.uye=null; cikis(); uyeDugmeGuncelle(); toast('Üye çıkışı yapıldı');
 }
 async function uyeYenile(sessiz){
   if(!S.uyeMod||!S.uye) return;
+  try{ const L=await uyeListesi(); const g=L.find(x=>x.kul===S.uye.kul);
+    if(!g||g.etiket!==S.uye.etiket||uyeSureBitti(g)){ S.uyeMod=false; cikis(); oyBilgiModal('⏳ Üyelik', !g||g.etiket!==S.uye.etiket?'Üyeliğin sona erdi ya da şifren değişti.':'Üyelik süren '+uyeBitisYazi(g.bitis)+' tarihinde doldu.'); return; }
+    if((g.bitis||0)!==(S.uye.bitis||0)){ S.uye.bitis=g.bitis||0; yaz(UYE_LS,S.uye); senkEkraniYenile(); }
+  }catch(e){}
   try{ const d=await uyeKanalCek(S.uye); if(JSON.stringify(d)!==JSON.stringify(S.uyeVeri)){ S.uyeVeri=d; senkEkraniYenile(); if(!sessiz) toast('Kanallar güncellendi'); } else if(!sessiz) toast('Liste güncel'); }
   catch(e){ toast('⚠️ '+e.message); if(/geçersiz/.test(e.message)){ try{localStorage.removeItem(UYE_LS);}catch(_){} S.uyeMod=false; cikis(); } }
 }
@@ -1322,7 +1331,9 @@ function uyeOrtamUygun(){ const ua=navigator.userAgent||''; return /;\s*wv\)/.te
 function uyeGirisAc(){
   if(!uyeOrtamUygun()){ toast('Üye girişi sadece IPTV ZONE uygulamasında yapılabilir'); return; }
   const kayit=oku(UYE_LS,null);
-  if(kayit){ toast('Giriş yapılıyor…'); uyeBaslat().catch(e=>{ toast('⚠️ '+e.message); uyeDugmeGuncelle(); uyeGirisAc(); }); return; }
+  if(kayit){ toast('Giriş yapılıyor…'); uyeBaslat().catch(e=>{ uyeDugmeGuncelle();
+      if(/süren/.test(e.message)){ oyBilgiModal('⏳ Üyelik süresi doldu', e.message); return; }
+      toast('⚠️ '+e.message); uyeGirisAc(); }); return; }
   const m=document.createElement('div'); m.className='modal'; m.onclick=e=>{if(e.target===m)m.remove()};
   m.innerHTML=`<div class="mk"><h3>👥 Üye Girişi</h3>
     <p class="aç">Sana verilen kullanıcı adı ve şifreyle gir.</p>
@@ -1340,6 +1351,13 @@ function uyeGirisAc(){
     catch(e){ dr.textContent='⚠️ '+e.message; ok.disabled=false; }
   };
   ok.onclick=git; sf.addEventListener('keydown',e=>{ if(e.key==='Enter') git(); });
+}
+function oyBilgiModal(baslik,metin){
+  const m=document.createElement('div'); m.className='modal'; m.onclick=e=>{if(e.target===m)m.remove()};
+  m.innerHTML=`<div class="mk"><h3>${esc(baslik)}</h3><p class="aç" style="font-size:14px">${esc(metin)}</p>
+    <button class="btn" onclick="this.closest('.modal').remove()">Tamam</button>
+    <button class="btn ikincil" style="margin-top:8px" onclick="this.closest('.modal').remove();try{localStorage.removeItem(UYE_LS)}catch(e){};uyeDugmeGuncelle();uyeGirisAc()">Başka hesapla gir</button></div>`;
+  document.body.appendChild(m);
 }
 let _uyeDugme=null;
 function uyeDugmeGuncelle(){ if(!_uyeDugme) return; const u=oku(UYE_LS,null); _uyeDugme.textContent=u?('👥 Üye Girişi ('+u.kul+')'):'👥 Üye Girişi'; }
@@ -1373,6 +1391,8 @@ ozelYan=function(){
   const h=yan.querySelector('h5'); if(h) h.textContent='KANALLAR';
   const b=document.createElement('div'); b.className='kat'; b.style.cssText='color:var(--acc2)';
   b.textContent='⟳ Listeyi yenile'; b.onclick=()=>uyeYenile(false); yan.appendChild(b);
+  if(S.uye){ const t=document.createElement('div'); t.className='kat'; t.style.cssText='cursor:default;font-size:12px';
+    t.textContent='⏳ Üyelik bitişi: '+uyeBitisYazi(S.uye.bitis); yan.appendChild(t); }
   const c=document.createElement('div'); c.className='kat'; c.style.cssText='color:var(--err)';
   c.textContent='🚪 Üye çıkışı ('+(S.uye?S.uye.kul:'')+')'; c.onclick=uyeCikis; yan.appendChild(c);
 };
