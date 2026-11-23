@@ -274,7 +274,7 @@
 </div>
 
 <!-- ======= OYNATICI ======= -->
-<div id="oynatici" class="hide">
+<div id="oynatici" class="hide" oncontextmenu="return false">
   <div class="oy-ust" id="oy-ust">
     <button class="gb" onclick="oynatKapat()">←</button>
     <div class="bilgi"><b id="oy-ad">—</b><small id="oy-alt"></small></div>
@@ -282,12 +282,11 @@
       <button title="Önceki kanal" onclick="kanalAtla(-1)">⏮</button>
       <button title="Sonraki kanal" onclick="kanalAtla(1)">⏭</button>
       <button id="oy-fav" title="Favori" onclick="oyFav()">☆</button>
-      <button title="Harici oynatıcıda aç" onclick="hariciAç()">📤</button>
       <button id="oy-doldur" title="Ekranı doldur / sığdır" onclick="doldurDegis()">⤢</button>
       <button title="Tam ekran" onclick="tamEkran()">⛶</button>
     </div>
   </div>
-  <video id="video" playsinline controls></video>
+  <video id="video" playsinline controls controlsList="nodownload noremoteplayback" disablePictureInPicture oncontextmenu="return false"></video>
   <div class="oy-mesaj hide" id="oy-mesaj"></div>
 </div>
 
@@ -949,9 +948,7 @@ document.addEventListener('keydown',e=>{
   },{passive:true});
 })();
 function oyHata(){
-  oyMesaj('<b>Yayın açılamadı.</b><small>Panel tarayıcı erişimine izin vermiyor olabilir (CORS), '+
-    'ya da bu kanal bu biçimde yayınlamıyor.<br>Harici oynatıcıda açmayı dene.</small>'+
-    '<button onclick="hariciAç()">📤 Harici oynatıcıda aç</button>');
+  oyMesaj('<b>Yayın açılamadı.</b><small>Kanal şu an yayın yapmıyor olabilir.<br>Biraz sonra tekrar dene.</small>');
 }
 function oyMesaj(html){ const m=document.getElementById('oy-mesaj'); m.innerHTML=html; m.classList.remove('hide'); }
 function oyMesajGizle(){ document.getElementById('oy-mesaj').classList.add('hide'); }
@@ -965,12 +962,6 @@ function oyFav(){
   if(S.favSet.has(a)){ S.favSet.delete(a); favStore.delete(a); b.textContent='☆'; b.classList.remove('on'); }
   else{ S.favSet.add(a); favStore.set(a,{...oyAktif}); b.textContent='★'; b.classList.add('on'); }
   yaz(LS.fav,[...S.favSet]); yaz(LS.fav+'_d',[...favStore.entries()]);
-}
-function hariciAç(){
-  if(!oyAktif)return; const url=oyAktif._link||yayinURL(oyAktif);
-  // VLC/MX gibi oynatıcılar bu linki açabilir; kopyala + yeni sekmede dene
-  navigator.clipboard&&navigator.clipboard.writeText(url).then(()=>toast('Yayın linki kopyalandı — VLC/MX Player\'a yapıştır')).catch(()=>{});
-  try{ window.open(url,'_blank'); }catch(e){}
 }
 function tamEkranMi(){ return !!(document.fullscreenElement||document.webkitFullscreenElement); }
 function tamEkranCik(){
@@ -1220,6 +1211,176 @@ ozelYan=function(){
 })();
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) senkYenile(true); });
 setTimeout(()=>senkYenile(true),300);
+
+/* ===== 👥 ÜYE GİRİŞİ (salt okunur) =====
+   Üye listesi açık depoda uyeler.json olarak durur. Her üyenin okuma anahtarı kendi şifresiyle
+   şifrelenmiştir (PBKDF2-SHA256 + HMAC). Doğru şifre girilmeden anahtar çözülemez.
+   Üye, sahibin Yerel Kanallar listesini görür ve izler; ekleyemez, düzenleyemez, silemez. */
+const UYE_URL='https://raw.githubusercontent.com/Dogukan3437/iptv_zone/main/uyeler.json';
+const UYE_LS='izp_uye';
+S.uyeMod=false; S.uyeVeri=null; S.uye=null;
+
+const _te=new TextEncoder();
+function b64Bayt(s){ const b=atob(String(s)); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i); return u; }
+function baytB64(u){ let s=''; for(let i=0;i<u.length;i++) s+=String.fromCharCode(u[i]); return btoa(s); }
+function birlestir(...a){ let n=0; a.forEach(x=>n+=x.length); const o=new Uint8Array(n); let p=0; a.forEach(x=>{o.set(x,p);p+=x.length;}); return o; }
+// --- yedek: saf JS SHA-256 (WebCrypto yoksa) ---
+const _K=new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+function sha256JS(m){
+  const l=m.length, n=((l+9+63)>>6)<<6, b=new Uint8Array(n); b.set(m); b[l]=0x80;
+  const bits=l*8; b[n-4]=bits>>>24; b[n-3]=(bits>>>16)&255; b[n-2]=(bits>>>8)&255; b[n-1]=bits&255;
+  const H=new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]), W=new Uint32Array(64);
+  const r=(x,k)=>(x>>>k)|(x<<(32-k));
+  for(let o=0;o<n;o+=64){
+    for(let i=0;i<16;i++) W[i]=(b[o+i*4]<<24)|(b[o+i*4+1]<<16)|(b[o+i*4+2]<<8)|b[o+i*4+3];
+    for(let i=16;i<64;i++){ const a=W[i-15],c=W[i-2]; W[i]=(W[i-16]+(r(a,7)^r(a,18)^(a>>>3))+W[i-7]+(r(c,17)^r(c,19)^(c>>>10)))|0; }
+    let [A,B,C,D,E,F,G,Hh]=H;
+    for(let i=0;i<64;i++){
+      const t1=(Hh+(r(E,6)^r(E,11)^r(E,25))+((E&F)^(~E&G))+_K[i]+W[i])|0, t2=((r(A,2)^r(A,13)^r(A,22))+((A&B)^(A&C)^(B&C)))|0;
+      Hh=G;G=F;F=E;E=(D+t1)|0;D=C;C=B;B=A;A=(t1+t2)|0;
+    }
+    H[0]+=A;H[1]+=B;H[2]+=C;H[3]+=D;H[4]+=E;H[5]+=F;H[6]+=G;H[7]+=Hh;
+  }
+  const out=new Uint8Array(32); for(let i=0;i<8;i++){ out[i*4]=H[i]>>>24; out[i*4+1]=(H[i]>>>16)&255; out[i*4+2]=(H[i]>>>8)&255; out[i*4+3]=H[i]&255; } return out;
+}
+function hmacJS(k,m){ if(k.length>64)k=sha256JS(k); const kp=new Uint8Array(64); kp.set(k); return sha256JS(birlestir(kp.map(x=>x^0x5c),sha256JS(birlestir(kp.map(x=>x^0x36),m)))); }
+function pbkdf2JS(pw,tuz,tur){ let u=hmacJS(pw,birlestir(tuz,new Uint8Array([0,0,0,1]))); const t=u.slice(); for(let i=1;i<tur;i++){ u=hmacJS(pw,u); for(let j=0;j<32;j++)t[j]^=u[j]; } return t; }
+const _subtle=(window.crypto&&window.crypto.subtle)||null;
+async function pbkdf2(pw,tuz,tur){
+  if(_subtle){ try{ const k=await _subtle.importKey('raw',pw,'PBKDF2',false,['deriveBits']);
+    return new Uint8Array(await _subtle.deriveBits({name:'PBKDF2',salt:tuz,iterations:tur,hash:'SHA-256'},k,256)); }catch(e){} }
+  return pbkdf2JS(pw,tuz,tur);
+}
+async function hmac(k,m){
+  if(_subtle){ try{ const kk=await _subtle.importKey('raw',k,{name:'HMAC',hash:'SHA-256'},false,['sign']);
+    return new Uint8Array(await _subtle.sign('HMAC',kk,m)); }catch(e){} }
+  return hmacJS(k,m);
+}
+async function uyeCoz(g,sifre){
+  const dk=await pbkdf2(_te.encode(sifre),b64Bayt(g.tuz),g.tur||100000);
+  const ek=await hmac(dk,_te.encode('enc')), mk=await hmac(dk,_te.encode('mac'));
+  const iv=b64Bayt(g.iv), ct=b64Bayt(g.veri);
+  if(baytB64(await hmac(mk,birlestir(iv,ct)))!==g.etiket) return null;     // şifre yanlış
+  const pt=new Uint8Array(ct.length);
+  for(let i=0;i*32<ct.length;i++){
+    const ks=await hmac(ek,birlestir(iv,new Uint8Array([i>>>24,(i>>>16)&255,(i>>>8)&255,i&255])));
+    for(let j=0;j<32&&i*32+j<ct.length;j++) pt[i*32+j]=ct[i*32+j]^ks[j];
+  }
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+// --- üye listesi / kanallar ---
+async function uyeListesi(){
+  const r=await fetch(UYE_URL+'?t='+Date.now(),{cache:'no-store'});
+  if(r.status===404) throw new Error('Henüz üye tanımlanmamış');
+  if(!r.ok) throw new Error('Üye listesi alınamadı (HTTP '+r.status+')');
+  return (await r.json()).uyeler||[];
+}
+async function uyeKanalCek(u){
+  const url='https://api.github.com/repos/'+u.repo+'/contents/kanallar.json?t='+Date.now();
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+u.token,'Accept':'application/vnd.github+json'},cache:'no-store'});
+  if(r.status===401||r.status===403||r.status===404) throw new Error('Üyelik geçersiz ya da iptal edilmiş');
+  if(!r.ok) throw new Error('Kanallar alınamadı (HTTP '+r.status+')');
+  const d=JSON.parse(b64Oku((await r.json()).content));
+  return {kats:Array.isArray(d.kats)?d.kats:[], kanallar:Array.isArray(d.kanallar)?d.kanallar:[]};
+}
+async function uyeGiris(kul,sifre){
+  kul=(kul||'').trim().toLowerCase();
+  const g=(await uyeListesi()).find(x=>x.kul===kul);
+  if(!g) throw new Error('Kullanıcı adı veya şifre hatalı');
+  const p=await uyeCoz(g,sifre);
+  if(!p||!p.token||!p.repo) throw new Error('Kullanıcı adı veya şifre hatalı');
+  yaz(UYE_LS,{kul:g.kul,etiket:g.etiket,repo:p.repo,token:p.token});
+  await uyeBaslat();
+}
+async function uyeBaslat(){
+  const u=oku(UYE_LS,null); if(!u) return false;
+  let liste=null; try{ liste=await uyeListesi(); }catch(e){}      // internet sorunu: kayıtlı anahtarla devam
+  if(liste){ const g=liste.find(x=>x.kul===u.kul);
+    if(!g||g.etiket!==u.etiket){ try{localStorage.removeItem(UYE_LS);}catch(e){} throw new Error('Üyeliğin sona erdi ya da şifren değişti. Yeniden giriş yap.'); } }
+  let d; try{ d=await uyeKanalCek(u); }catch(e){ if(/geçersiz/.test(e.message)){ try{localStorage.removeItem(UYE_LS);}catch(_){} } throw e; }
+  S.uyeMod=true; S.uyeVeri=d; S.uye=u;
+  S.profil={tip:'ozel',ad:'Üye: '+u.kul,uye:true};
+  S.kategoriler={canli:[],film:[],dizi:[]}; S.m3uData=null; S._ozelKat=null;
+  uygulamaAç();
+  return true;
+}
+function uyeCikis(){
+  try{ localStorage.removeItem(UYE_LS); }catch(e){}
+  S.uyeMod=false; S.uyeVeri=null; S.uye=null; cikis(); uyeDugmeGuncelle(); toast('Üye çıkışı yapıldı');
+}
+async function uyeYenile(sessiz){
+  if(!S.uyeMod||!S.uye) return;
+  try{ const d=await uyeKanalCek(S.uye); if(JSON.stringify(d)!==JSON.stringify(S.uyeVeri)){ S.uyeVeri=d; senkEkraniYenile(); if(!sessiz) toast('Kanallar güncellendi'); } else if(!sessiz) toast('Liste güncel'); }
+  catch(e){ toast('⚠️ '+e.message); if(/geçersiz/.test(e.message)){ try{localStorage.removeItem(UYE_LS);}catch(_){} S.uyeMod=false; cikis(); } }
+}
+
+// --- giriş penceresi ---
+// Üye girişi sadece telefondaki IPTV ZONE uygulamasında (Android WebView) açılır;
+// tarayıcıda geliştirici araçlarıyla linklere bakılmasını zorlaştırır.
+function uyeOrtamUygun(){ const ua=navigator.userAgent||''; return /;\s*wv\)/.test(ua) || (/Android/.test(ua) && /Version\/[\d.]+/.test(ua)) || !!(window.Android||window.AndroidBridge); }
+function uyeGirisAc(){
+  if(!uyeOrtamUygun()){ toast('Üye girişi sadece IPTV ZONE uygulamasında yapılabilir'); return; }
+  const kayit=oku(UYE_LS,null);
+  if(kayit){ toast('Giriş yapılıyor…'); uyeBaslat().catch(e=>{ toast('⚠️ '+e.message); uyeDugmeGuncelle(); uyeGirisAc(); }); return; }
+  const m=document.createElement('div'); m.className='modal'; m.onclick=e=>{if(e.target===m)m.remove()};
+  m.innerHTML=`<div class="mk"><h3>👥 Üye Girişi</h3>
+    <p class="aç">Sana verilen kullanıcı adı ve şifreyle gir.</p>
+    <div class="alan"><label>Kullanıcı adı</label><input id="ug-kul" autocapitalize="off" autocomplete="off"></div>
+    <div class="alan"><label>Şifre</label><input id="ug-sifre" type="password" autocomplete="off"></div>
+    <div class="notlar hide" id="ug-durum" style="margin:0 0 10px"></div>
+    <button class="btn" id="ug-ok">Giriş</button></div>`;
+  document.body.appendChild(m);
+  const kul=m.querySelector('#ug-kul'), sf=m.querySelector('#ug-sifre'), dr=m.querySelector('#ug-durum'), ok=m.querySelector('#ug-ok');
+  kul.focus();
+  const git=async()=>{
+    if(!kul.value.trim()||!sf.value){ toast('Kullanıcı adı ve şifre gir'); return; }
+    ok.disabled=true; dr.classList.remove('hide'); dr.textContent='Kontrol ediliyor…';
+    try{ await uyeGiris(kul.value,sf.value); m.remove(); uyeDugmeGuncelle(); toast('Hoş geldin '+kul.value.trim()); }
+    catch(e){ dr.textContent='⚠️ '+e.message; ok.disabled=false; }
+  };
+  ok.onclick=git; sf.addEventListener('keydown',e=>{ if(e.key==='Enter') git(); });
+}
+let _uyeDugme=null;
+function uyeDugmeGuncelle(){ if(!_uyeDugme) return; const u=oku(UYE_LS,null); _uyeDugme.textContent=u?('👥 Üye Girişi ('+u.kul+')'):'👥 Üye Girişi'; }
+(function(){
+  const d=[...document.querySelectorAll('#giris button')].find(x=>/girişOzel/.test(x.getAttribute('onclick')||''));
+  if(d){ const b=document.createElement('button'); b.className='btn'; b.style.marginTop='8px'; b.onclick=uyeGirisAc; d.before(b); _uyeDugme=b; uyeDugmeGuncelle(); }
+})();
+
+// --- üye modunda: veriyi üyeden oku, yazmayı engelle, düzenleme düğmelerini gizle ---
+const _ozelOkuAsil=ozelOku;
+ozelOku=function(){ if(S.uyeMod&&S.uyeVeri) return JSON.parse(JSON.stringify(S.uyeVeri)); return _ozelOkuAsil(); };
+const _ozelYazSenk=ozelYaz;
+ozelYaz=function(d){ if(S.uyeMod){ toast('Üyeler kanal ekleyemez / düzenleyemez'); return; } return _ozelYazSenk(d); };
+const _senkYenileAsil=senkYenile;
+senkYenile=function(sessiz){ if(S.uyeMod) return uyeYenile(true); return _senkYenileAsil(sessiz); };
+const _ozelKatAcAsil=ozelKategoriAç;
+ozelKategoriAç=function(ki){
+  _ozelKatAcAsil(ki);
+  if(!S.uyeMod) return;
+  const ic=document.getElementById('icerik');
+  ic.querySelectorAll('.baslik2 > span').forEach(x=>x.remove());
+  ic.querySelectorAll('.favb[title="Düzenle"], .favb[title="Sil"]').forEach(x=>x.remove());
+  const bos=ic.querySelector('.durum'); if(bos && /Kanal/.test(bos.textContent)) bos.innerHTML='<div class="di">📺</div><b>Bu kategoride kanal yok</b>';
+};
+const _ozelYanSenk=ozelYan;
+ozelYan=function(){
+  _ozelYanSenk();
+  if(!S.uyeMod) return;
+  const yan=document.getElementById('yan');
+  [...yan.querySelectorAll('.kat')].forEach(x=>{ if(/Senkron|Kategori ekle/.test(x.textContent)) x.remove(); });
+  const h=yan.querySelector('h5'); if(h) h.textContent='KANALLAR';
+  const b=document.createElement('div'); b.className='kat'; b.style.cssText='color:var(--acc2)';
+  b.textContent='⟳ Listeyi yenile'; b.onclick=()=>uyeYenile(false); yan.appendChild(b);
+  const c=document.createElement('div'); c.className='kat'; c.style.cssText='color:var(--err)';
+  c.textContent='🚪 Üye çıkışı ('+(S.uye?S.uye.kul:'')+')'; c.onclick=uyeCikis; yan.appendChild(c);
+};
+const _girisOzelAsil=girişOzel;
+girişOzel=function(){ S.uyeMod=false; S.uyeVeri=null; S.uye=null; return _girisOzelAsil(); };
+// profil butonundan "Yerel Kanallar" açılınca üye modu kapansın (kayıtlı profiller girişOzel'i çağırır)
+const _cikisAsil=cikis;
+cikis=function(){ _cikisAsil(); S.uyeMod=false; S.uyeVeri=null; uyeDugmeGuncelle(); };
 </script>
 </body>
 </html>
