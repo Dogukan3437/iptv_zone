@@ -1340,6 +1340,9 @@ async function uyeBaslat(){
   S.profil={tip:'ozel',ad:'Üye: '+u.kul,uye:true};
   S.kategoriler={canli:[],film:[],dizi:[]}; S.m3uData=null; S._ozelKat=null;
   uygulamaAç();
+  try{ const b=u.bitis||0, gun=Math.ceil((b*1000-Date.now())/864e5), bugun=new Date().toDateString();
+    if(b && gun<=3 && localStorage.getItem('izp_sure_uyari')!==bugun){ localStorage.setItem('izp_sure_uyari',bugun);
+      oyBilgiModal('⏳ Üyeliğin bitiyor', gun<=0?'Üyeliğin bugün bitiyor.':'Üyeliğinin bitmesine '+gun+' gün kaldı ('+uyeBitisYazi(b)+'). Kesinti olmaması için yöneticiyle görüş.'); } }catch(e){}
   return true;
 }
 function uyeSureBitti(g){ return !!(g && g.bitis && g.bitis*1000 < Date.now()); }
